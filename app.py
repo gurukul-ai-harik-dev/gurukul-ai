@@ -5,19 +5,47 @@ from ddgs import DDGS
 from sentence_transformers import SentenceTransformer, util
 import yt_dlp
 
-# API keys will be set as Streamlit secrets (not hardcoded)
+# ----------------------------------------------------------------------------
+# API keys from Streamlit secrets (set in cloud dashboard)
+# ----------------------------------------------------------------------------
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"] if "YOUTUBE_API_KEY" in st.secrets else None
+YOUTUBE_API_KEY = st.secrets.get("YOUTUBE_API_KEY", "")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Load relevance model (cached)
+# ----------------------------------------------------------------------------
+# Cached model loader
+# ----------------------------------------------------------------------------
 @st.cache_resource
-def load_model():
+def load_relevance_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-relevance_model = load_model()
+relevance_model = load_relevance_model()
 
+# ----------------------------------------------------------------------------
+# Cached summary generator (only runs once per unique inputs)
+# ----------------------------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def generate_summary(concept, video_titles, article_titles):
+    """Cached summary using Groq. Inputs are simple types for cache hash."""
+    prompt = f"""Based on these resources, write a concise 3-4 sentence summary of the concept '{concept}'.
+Resources: {', '.join(video_titles + article_titles)}
+Summary:"""
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    data = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 200
+    }
+    resp = requests.post(GROQ_URL, headers=headers, json=data)
+    if resp.status_code == 200:
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    return "Could not generate summary."
+
+# ----------------------------------------------------------------------------
+# Core AI functions (unchanged from your Phase 2)
+# ----------------------------------------------------------------------------
 def get_micro_concepts(syllabus_text, exam="UPSC"):
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -109,30 +137,57 @@ def score_resources(concept, resources, resource_type='youtube'):
     scored.sort(key=lambda x: x['score'], reverse=True)
     return scored
 
-# Streamlit UI (polished version with 5 videos, 5 articles, lazy summary)
+# ----------------------------------------------------------------------------
+# Streamlit UI – stateful expanders with lazy summaries
+# ----------------------------------------------------------------------------
 st.set_page_config(page_title="GurukulAI", layout="wide")
 st.title("📚 GurukulAI – Free AI Study Planner for Govt Exams")
 st.markdown("Paste your syllabus and get micro‑concepts with embedded videos, articles & AI summary.")
 
-exam = st.selectbox("Select Exam", ["UPSC", "SSC CGL", "IBPS PO", "NEET", "JEE Main"])
+exam = st.selectbox("Select Exam", ["APPSC","UPSC", "SSC CGL", "IBPS PO","TGPSC" "NEET", "JEE Main"])
 user_text = st.text_area("Paste syllabus text here:", height=300)
+
+# Session state initialization
+if "concepts" not in st.session_state:
+    st.session_state.concepts = None
+if "expanded_concepts" not in st.session_state:
+    st.session_state.expanded_concepts = set()         # indices of expanders that should be open
+if "summary_requests" not in st.session_state:
+    st.session_state.summary_requests = set()          # indices for which summary was requested
+if "summaries" not in st.session_state:
+    st.session_state.summaries = {}                    # index -> summary text
 
 if st.button("✨ Generate Study Plan"):
     if user_text.strip() == "":
         st.warning("Please paste some syllabus content first.")
     else:
         with st.spinner("AI breaking down syllabus..."):
-            concepts = get_micro_concepts(user_text, exam)
-        st.success(f"Found {len(concepts)} micro‑concepts!")
-        for i, concept in enumerate(concepts, 1):
-            with st.expander(f"📌 {i}. {concept}"):
-                col1, col2 = st.columns(2)
-                ranked_videos = []
-                ranked_pages = []
+            try:
+                st.session_state.concepts = get_micro_concepts(user_text, exam)
+                st.session_state.expanded_concepts = set()
+                st.session_state.summary_requests = set()
+                st.session_state.summaries = {}
+            except Exception as e:
+                st.error(f"Error generating concepts: {e}")
+                st.session_state.concepts = None
 
-                with col1:
-                    st.markdown("**🎥 Top 5 Videos**")
-                    with st.spinner("Fetching videos..."):
+if st.session_state.concepts:
+    concepts = st.session_state.concepts
+    st.success(f"Found {len(concepts)} micro‑concepts!")
+
+    for i, concept in enumerate(concepts, 1):
+        # Determine if this expander should be open (from previous summary click)
+        is_expanded = i in st.session_state.expanded_concepts
+
+        with st.expander(f"📌 {i}. {concept}", expanded=is_expanded):
+            col1, col2 = st.columns(2)
+            ranked_videos = []
+            ranked_pages = []
+
+            with col1:
+                st.markdown("**🎥 Top 5 Videos**")
+                with st.spinner("Fetching videos..."):
+                    try:
                         videos = search_youtube(concept)
                         ranked_videos = score_resources(concept, videos, 'youtube')
                         ranked_videos = [v for v in ranked_videos if v['score'] > 0.2]
@@ -140,34 +195,39 @@ if st.button("✨ Generate Study Plan"):
                         for v in ranked_videos[:5]:
                             st.video(v['url'])
                             st.markdown(f"📺 [Watch on YouTube]({v['url']})")
+                    except Exception as e:
+                        st.warning(f"Couldn't load videos: {e}")
 
-                with col2:
-                    st.markdown("**🌐 Top 5 Articles**")
-                    with st.spinner("Fetching articles..."):
+            with col2:
+                st.markdown("**🌐 Top 5 Articles**")
+                with st.spinner("Fetching articles..."):
+                    try:
                         pages = search_web(concept)
                         ranked_pages = score_resources(concept, pages, 'web')
                         for p in ranked_pages[:5]:
                             st.markdown(f"- [{p['title']}]({p['link']})")
+                    except Exception as e:
+                        st.warning(f"Couldn't load articles: {e}")
 
-                    # Lazy summary
-                    st.markdown("---")
-                    if st.button(f"🧠 Generate Summary for this concept", key=f"summary_btn_{i}"):
-                        with st.spinner("Generating summary..."):
-                            # Use a simple summary function (no Ollama)
-                            # For cloud, we can use Groq again to summarize
-                            prompt = f"""Based on these resources, write a concise 3-4 sentence summary of the concept '{concept}'.
-Resources: {' '.join([v['title'] for v in ranked_videos[:3]] + [a['title'] for a in ranked_pages[:3]])}
-Summary:"""
-                            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-                            data = {
-                                "model": "llama-3.3-70b-versatile",
-                                "messages": [{"role": "user", "content": prompt}],
-                                "temperature": 0.3,
-                                "max_tokens": 200
-                            }
-                            resp = requests.post(GROQ_URL, headers=headers, json=data)
-                            if resp.status_code == 200:
-                                summary = resp.json()["choices"][0]["message"]["content"]
-                                st.info(summary)
-                            else:
-                                st.warning("Could not generate summary.")
+            # ---- Lazy Summary (state‑preserving) ----
+            st.markdown("---")
+            # Button that triggers summary generation and records the expander state
+            if st.button(f"🧠 Generate Summary for this concept", key=f"summary_btn_{i}"):
+                # When clicked, add this concept's expander to the "open" set
+                st.session_state.expanded_concepts.add(i)
+                # Mark that summary was requested for this concept
+                st.session_state.summary_requests.add(i)
+
+            # If summary was requested, generate (if not already cached in session) and display
+            if i in st.session_state.summary_requests:
+                if i not in st.session_state.summaries:
+                    with st.spinner("Generating summary..."):
+                        # Prepare simple inputs for caching
+                        vid_titles = [v['title'] for v in ranked_videos[:3]]
+                        art_titles = [a['title'] for a in ranked_pages[:3]]
+                        if vid_titles or art_titles:
+                            summary = generate_summary(concept, tuple(vid_titles), tuple(art_titles))
+                            st.session_state.summaries[i] = summary
+                        else:
+                            st.session_state.summaries[i] = "Not enough resources to summarise."
+                st.info(st.session_state.summaries[i])
