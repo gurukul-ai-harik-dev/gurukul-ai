@@ -89,6 +89,8 @@ def search_youtube(query, max_results=5):
         'force_generic_extractor': False,
         'skip_download': True,
         'ignoreerrors': True,
+        # Use an Android client to bypass JS runtime requirement
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -144,8 +146,8 @@ st.set_page_config(page_title="GurukulAI", layout="wide")
 st.title("📚 GurukulAI – Free AI Study Planner for Govt Exams")
 st.markdown("Paste your syllabus and get micro‑concepts with embedded videos, articles & AI summary.")
 
-exam = st.selectbox("Select Exam", ["APPSC","TGPSC","UPSC", "SSC CGL", "IBPS PO", "NEET", "JEE Main"])
-user_text = st.text_area("Paste syllabus text here:", height=150)
+exam = st.selectbox("Select Exam", ["UPSC", "SSC CGL", "IBPS PO", "NEET", "JEE Main"])
+user_text = st.text_area("Paste syllabus text here:", height=300)
 
 # Session state initialization
 if "concepts" not in st.session_state:
