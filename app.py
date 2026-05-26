@@ -44,7 +44,7 @@ Summary:"""
     return "Could not generate summary."
 
 # ----------------------------------------------------------------------------
-# Core AI functions (unchanged from your Phase 2)
+# Core AI functions
 # ----------------------------------------------------------------------------
 def get_micro_concepts(syllabus_text, exam="UPSC"):
     headers = {
@@ -138,13 +138,13 @@ def score_resources(concept, resources, resource_type='youtube'):
     return scored
 
 # ----------------------------------------------------------------------------
-# Streamlit UI – stateful expanders with lazy summaries
+# Streamlit UI – stateful expanders with lazy summaries inside right column
 # ----------------------------------------------------------------------------
 st.set_page_config(page_title="GurukulAI", layout="wide")
 st.title("📚 GurukulAI – Free AI Study Planner for Govt Exams")
 st.markdown("Paste your syllabus and get micro‑concepts with embedded videos, articles & AI summary.")
 
-exam = st.selectbox("Select Exam", ["APPSC","UPSC", "SSC CGL", "IBPS PO","TGPSC" "NEET", "JEE Main"])
+exam = st.selectbox("Select Exam", ["UPSC", "SSC CGL", "IBPS PO", "NEET", "JEE Main"])
 user_text = st.text_area("Paste syllabus text here:", height=300)
 
 # Session state initialization
@@ -209,25 +209,20 @@ if st.session_state.concepts:
                     except Exception as e:
                         st.warning(f"Couldn't load articles: {e}")
 
-            # ---- Lazy Summary (state‑preserving) ----
-            st.markdown("---")
-            # Button that triggers summary generation and records the expander state
-            if st.button(f"🧠 Generate Summary for this concept", key=f"summary_btn_{i}"):
-                # When clicked, add this concept's expander to the "open" set
-                st.session_state.expanded_concepts.add(i)
-                # Mark that summary was requested for this concept
-                st.session_state.summary_requests.add(i)
+                # ---- Lazy Summary inside the right column ----
+                st.markdown("---")
+                if st.button(f"🧠 Generate Summary", key=f"summary_btn_{i}"):
+                    st.session_state.expanded_concepts.add(i)
+                    st.session_state.summary_requests.add(i)
 
-            # If summary was requested, generate (if not already cached in session) and display
-            if i in st.session_state.summary_requests:
-                if i not in st.session_state.summaries:
-                    with st.spinner("Generating summary..."):
-                        # Prepare simple inputs for caching
-                        vid_titles = [v['title'] for v in ranked_videos[:3]]
-                        art_titles = [a['title'] for a in ranked_pages[:3]]
-                        if vid_titles or art_titles:
-                            summary = generate_summary(concept, tuple(vid_titles), tuple(art_titles))
-                            st.session_state.summaries[i] = summary
-                        else:
-                            st.session_state.summaries[i] = "Not enough resources to summarise."
-                st.info(st.session_state.summaries[i])
+                if i in st.session_state.summary_requests:
+                    if i not in st.session_state.summaries:
+                        with st.spinner("Generating summary..."):
+                            vid_titles = [v['title'] for v in ranked_videos[:3]]
+                            art_titles = [a['title'] for a in ranked_pages[:3]]
+                            if vid_titles or art_titles:
+                                summary = generate_summary(concept, tuple(vid_titles), tuple(art_titles))
+                                st.session_state.summaries[i] = summary
+                            else:
+                                st.session_state.summaries[i] = "Not enough resources to summarise."
+                    st.info(st.session_state.summaries[i])
