@@ -146,8 +146,8 @@ st.set_page_config(page_title="GurukulAI", layout="wide")
 st.title("📚 GurukulAI – Free AI Study Planner for Govt Exams")
 st.markdown("Paste your syllabus and get micro‑concepts with embedded videos, articles & AI summary.")
 
-exam = st.selectbox("Select Exam", ["UPSC", "SSC CGL", "IBPS PO", "NEET", "JEE Main"])
-user_text = st.text_area("Paste syllabus text here:", height=300)
+exam = st.selectbox("Select Exam", ["UPSC", "APPSC","TGPSC","SSC CGL", "IBPS PO", "NEET", "JEE Main"])
+user_text = st.text_area("Paste syllabus text here:", height=120)
 
 # Session state initialization
 if "concepts" not in st.session_state:
